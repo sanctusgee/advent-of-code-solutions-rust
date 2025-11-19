@@ -1,0 +1,19 @@
+[package]
+name = "aoc-lib"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+reqwest.workspace = true
+colored.workspace = true
+regex = "1.12.2"
+
+# Optional: Uncomment these as needed for your solutions
+# regex.workspace = true
+ ahash.workspace = true
+ atoi.workspace = true
+ itertools.workspace = true
+ once_cell.workspace = true
