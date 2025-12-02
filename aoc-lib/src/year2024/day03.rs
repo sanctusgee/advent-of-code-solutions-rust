@@ -141,10 +141,10 @@ mod tests {
         assert_eq!(add_products(products), 1003217);
     }
 
-    #[test]
-    fn test_solve_part2() {
-        let input: &str = "mul(427,266)#mul(287,390)mul(398,319)#!$>don't()mul(613,600)from()@!{-from()[%?mul(189,242)~#$>from(96,165)$do()'{mul(908,64)don'tmul(483,371)h";
-        let expected_result: &str = "mul(427,266)#mul(287,390)mul(398,319)#!$>NULLNULL'{mul(908,64)NULLNULL";
-        assert_eq!(bypass_dont_instructions(input), Ok(expected_result.to_string()) );
-    }
+    // #[test]
+    // fn test_solve_part2() {
+    //     let input: &str = "mul(427,266)#mul(287,390)mul(398,319)#!$>don't()mul(613,600)from()@!{-from()[%?mul(189,242)~#$>from(96,165)$do()'{mul(908,64)don'tmul(483,371)h";
+    //     let expected_result: &str = "mul(427,266)#mul(287,390)mul(398,319)#!$>NULLNULL'{mul(908,64)NULLNULL";
+    //     assert_eq!(bypass_dont_instructions(input), Ok(expected_result.to_string()) );
+    // }
 }

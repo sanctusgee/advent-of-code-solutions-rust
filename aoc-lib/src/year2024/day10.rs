@@ -236,7 +236,7 @@ mod tests {
         let trailheads = find_trailheads(&map);
         
         assert_eq!(trailheads.len(), 1);
-        let rating = calculate_trailhead_rating(&map, trailheads[0].0, trailheads[0].1);
+        calculate_trailhead_rating(&map, trailheads[0].0, trailheads[0].1);
         // Note: This test might not work exactly due to the '.' replacement
         // but the concept is correct
     }

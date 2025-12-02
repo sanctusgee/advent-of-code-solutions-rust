@@ -61,16 +61,56 @@ pub fn solve_part1(input: &str) -> Result<impl std::fmt::Display> {
 }
 
 
-// Rename _input variable in fn signature back to input after implementing the solution
-fn solve_part2(_input: &str) -> Result<impl std::fmt::Display> {
-	// add your Part 2 solution here
-	Ok(0)
+// Part 2: count *every* click that lands on 0 during rotations (method 0x434C49434B).
+fn solve_part2(input: &str) -> Result<impl std::fmt::Display> {
+    let mut start_pos: i32 = 50;
+    let mut zero_hits: i64 = 0;
+
+    for (idx, raw) in input.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.len() < 2 {
+            return Err(anyhow!("Line {} too short: {}", idx + 1, line));
+        }
+
+        let (direction, dist_str) = line.split_at(1);
+        let dist: i32 = dist_str
+            .parse()
+            .map_err(|e| anyhow!("Line {} invalid distance `{}`: {}", idx + 1, dist_str, e))?;
+
+        // Count how many times we pass through position 0 during this move
+        // We need to simulate each step to count every time we land on 0
+        let step_dir = match direction {
+            "R" => 1,
+            "L" => -1,
+            _ => return Err(anyhow!("Line {} invalid direction `{}`", idx + 1, direction)),
+        };
+
+        for _ in 0..dist {
+            start_pos = (start_pos + step_dir).rem_euclid(100);
+            if start_pos == 0 {
+                zero_hits += 1;
+            }
+        }
+    }
+
+    Ok(zero_hits)
 }
+
 
 
 #[test]
 fn part1_example_password_is_3() {
-	let input = "L68\nL30\nR48\nL5\nR60\nL55\nL1\nL99\nR14\nL82\n";
-	let ans = solve_part1(input).unwrap().to_string();
-	assert_eq!(ans, "3");
+    let input = "L68\nL30\nR48\nL5\nR60\nL55\nL1\nL99\nR14\nL82\n";
+    let ans = solve_part1(input).unwrap().to_string();
+    assert_eq!(ans, "3");
+}
+
+#[test]
+fn part2_example_password_is_6() {
+    let input = "L68\nL30\nR48\nL5\nR60\nL55\nL1\nL99\nR14\nL82\n";
+    let ans = solve_part2(input).unwrap().to_string();
+    assert_eq!(ans, "6");
 }
