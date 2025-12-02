@@ -3,7 +3,6 @@ use crate::utils;
 
 const EXPECTED_XMAS: &[char] = &['M', 'A', 'S'];
 
-
 pub fn solve() -> Result<()> {
     let input = utils::load_input(2024, 4)?;
 
