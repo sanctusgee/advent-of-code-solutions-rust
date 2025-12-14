@@ -2,7 +2,7 @@
 
 // Advent of Code 2025 - Day 1
 // https://adventofcode.com/2025/day/1
-use anyhow::{Result, anyhow};
+use anyhow::{Result, Context};
 use crate::utils;
 
 
@@ -21,84 +21,51 @@ pub fn solve() -> Result<()> {
 }
 
 pub fn solve_part1(input: &str) -> Result<impl std::fmt::Display> {
-    let mut start_pos: i32 = 50;      // starts at 50
-    let mut zero_hits: u32 = 0;     // count number of times the dial lands on 0
+    let mut pos = 50;  // Dial starts at position 50
+    let mut hits = 0;  // Count final positions that land on 0
 
-    // the input file is multi-line so we process it line by line
-    for (idx, raw) in input.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() {
-            continue;
-        }
-        if line.len() < 2 {
-            return Err(anyhow!("Line {} too short: {}", idx + 1, line));
-        }
+    for line in input.lines() {
+        let line = line.trim();
+        if line.is_empty() { continue; }
 
-        // get the direction and distance from the line, eg "L30" becomws ("L", 30)
-        let (direction, dist_str) = line.split_at(1);
-        let dist: i32 = dist_str.parse()
-            .map_err(|e| anyhow!("Line {} invalid distance '{}': {}", idx + 1, dist_str, e))?;
+        let (dir, dist) = parse_move(line)?;
+        // Jump directly to final position after full rotation
+        pos = (pos + if dir == 'L' { -dist } else { dist }).rem_euclid(100);
 
-        // this part is just moving the dial left or right and wrapping around at 0 and 99
-        // so we use rem_euclid to handle negative wrap-around correctly
-        // rem_euclid(100) is the Rust  of Python's % operator for positive modulus
-        let d = dist.rem_euclid(100); // normalize any large distance
-
-        // Logic: if moving left, subtract distance; if right, add distance
-        start_pos = match direction {
-            "L" => (start_pos - d).rem_euclid(100),
-            "R" => (start_pos + d).rem_euclid(100),
-            _ => return Err(anyhow!("Line {} invalid direction '{}'", idx + 1, direction)),
-        };
-
-        // increment by 1 if we hit zero
-        if start_pos == 0 {
-            zero_hits += 1;
-        }
+        if pos == 0 { hits += 1; }
     }
 
-    Ok(zero_hits)
+    Ok(hits)
 }
 
-
-// Part 2: count *every* click that lands on 0 during rotations (method 0x434C49434B).
 fn solve_part2(input: &str) -> Result<impl std::fmt::Display> {
-    let mut start_pos: i32 = 50;
-    let mut zero_hits: i64 = 0;
+    let mut pos: i8 = 50;
+    let mut hits = 0i64;  // u64 would overflow on large inputs
 
-    for (idx, raw) in input.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() {
-            continue;
-        }
-        if line.len() < 2 {
-            return Err(anyhow!("Line {} too short: {}", idx + 1, line));
-        }
+    for line in input.lines() {
+        let line = line.trim();
+        if line.is_empty() { continue; }
 
-        let (direction, dist_str) = line.split_at(1);
-        let dist: i32 = dist_str
-            .parse()
-            .map_err(|e| anyhow!("Line {} invalid distance `{}`: {}", idx + 1, dist_str, e))?;
+        let (dir, dist) = parse_move(line)?;
+        let step = if dir == 'L' { -1 } else { 1 };
 
-        // Count how many times we pass through position 0 during this move
-        // We need to simulate each step to count every time we land on 0
-        let step_dir = match direction {
-            "R" => 1,
-            "L" => -1,
-            _ => return Err(anyhow!("Line {} invalid direction `{}`", idx + 1, direction)),
-        };
-
+        // Count every individual click that lands on 0 during rotation
         for _ in 0..dist {
-            start_pos = (start_pos + step_dir).rem_euclid(100);
-            if start_pos == 0 {
-                zero_hits += 1;
-            }
+            pos = (pos + step).rem_euclid(100);
+            if pos == 0 { hits += 1; }
         }
     }
 
-    Ok(zero_hits)
+    Ok(hits)
 }
 
+// Parse "L30" -> ('L', 30)
+fn parse_move(line: &str) -> Result<(char, i32)> {
+    let dir = line.chars().next().context("Empty line")?;
+     // as per comments online --> always trust AoC input is always valid; be less defensive
+    let dist = line[1..].parse()?;
+    Ok((dir, dist))
+}
 
 
 #[test]
