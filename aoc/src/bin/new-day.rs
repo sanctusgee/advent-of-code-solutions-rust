@@ -74,6 +74,7 @@ fn main() -> Result<()> {
 
     // User guidance
     println!("\nCreated template for year {} day {}", year, day);
+    println!("\nUpdated aoc-lib/src/year{}/mod.rs to register the new day", year);
     println!("\nNext steps:");
     println!("  1. Download input or Copy/paste input to: input/year{}/day{:02}.txt", year, day);
     println!(
