@@ -9,6 +9,7 @@ mod day03;
 mod day04;
 mod day05;
 mod day07;
+mod day08;
 
 
 type DayEntry = (&'static str, fn() -> Result<()>);
@@ -20,4 +21,5 @@ pub const DAYS: &[DayEntry] =
     ("4", day04::solve),
     ("5", day05::solve),
     ("7", day07::solve),
+    ("8", day08::solve),
 ];
