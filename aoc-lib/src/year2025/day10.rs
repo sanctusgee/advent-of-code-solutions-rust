@@ -7,45 +7,19 @@
 
 use anyhow::{anyhow, Result};
 use crate::utils;
+use std::collections::HashMap;
 
 pub fn solve() -> Result<()> {
     let input = utils::load_input(2025, 10)?;
 
-    let part1 = solve_part1(&input)?;
-    let part2 = solve_part2(&input)?;
-
     println!("Day 10 / Year 2025");
-    println!("Part 1: {}", part1);
-    println!("Part 2: {}", part2);
+    println!("Part 1: {}", solve_part1(&input)?);
+    println!("Part 2: {}", solve_part2(&input)?);
 
     Ok(())
 }
 
-// -------------
-// Part 1
-// -------------------
-//
-// For each machine (line), compute the minimum number of button presses
-// needed to reach the target light configuration.
-// Total answer is the sum across machines.
-//
-fn solve_part1(input: &str) -> Result<impl std::fmt::Display> {
-    let mut total: u64 = 0;
-
-    for line in input.lines().filter(|l| !l.trim().is_empty()) {
-        total += min_presses_for_machine(line)? as u64;
-    }
-
-    Ok(total)
-}
-
-fn solve_part2(_input: &str) -> Result<impl std::fmt::Display> {
-    Ok(0)
-}
-
-// -------------------
-// Core logic
-// -------------------
+// ================= Part 1 =================
 //
 // Each machine is a linear system over GF(2):
 //
@@ -62,16 +36,19 @@ fn solve_part2(_input: &str) -> Result<impl std::fmt::Display> {
 // - Enumerate all combinations of the nullspace basis and choose
 //   the solution with minimum popcount
 //
+fn solve_part1(input: &str) -> Result<u64> {
+    input
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(min_presses_for_machine)
+        .map(|r| r.map(|x| x as u64))
+        .try_fold(0, |a, b| Ok(a + b?))
+}
+
 fn min_presses_for_machine(line: &str) -> Result<u32> {
-    // Parse diagram: [.#.#]
     let diagram = extract_between(line, '[', ']')
         .ok_or_else(|| anyhow!("missing diagram"))?;
-    let n_lights = diagram.len();
-    if n_lights > 128 {
-        return Err(anyhow!("too many lights"));
-    }
 
-    // Target vector b (bit i = desired state of light i)
     let mut target: u128 = 0;
     for (i, c) in diagram.chars().enumerate() {
         if c == '#' {
@@ -79,145 +56,239 @@ fn min_presses_for_machine(line: &str) -> Result<u32> {
         }
     }
 
-    // Parse buttons: each (...) becomes a bitmask over lights
-    let mut buttons: Vec<u128> = Vec::new();
-    let mut rest = line;
+    let buttons = parse_buttons(line)?;
 
-    while let Some((inside, after)) = extract_between_with_rest(rest, '(', ')') {
-        let mut mask: u128 = 0;
-        for idx in inside.split(',').map(|s| s.trim()) {
-            let i: usize = idx.parse()?;
-            mask |= 1u128 << i;
-        }
-        buttons.push(mask);
-        rest = after;
-    }
-
-    let m = buttons.len();
-    if m == 0 {
-        return Err(anyhow!("no buttons"));
-    }
-    if m > 128 {
-        return Err(anyhow!("too many buttons"));
-    }
-
-    // Build system: one equation per light
-    // Each row is (variable_mask, rhs_bit)
-    let mut rows: Vec<(u128, bool)> = Vec::new();
-
-    for light in 0..n_lights {
-        let mut vars: u128 = 0;
-        for (j, &b) in buttons.iter().enumerate() {
-            if ((b >> light) & 1) == 1 {
-                vars |= 1u128 << j;
+    let rows = (0..diagram.len())
+        .map(|light| {
+            let mut vars = 0u128;
+            for (j, &b) in buttons.iter().enumerate() {
+                if (b >> light) & 1 == 1 {
+                    vars |= 1u128 << j;
+                }
             }
-        }
-        let rhs = ((target >> light) & 1) == 1;
-        rows.push((vars, rhs));
-    }
+            (vars, (target >> light) & 1 == 1)
+        })
+        .collect();
 
-    // Solve Ax = b over GF(2), minimizing popcount(x)
-    let (x0, basis) = gaussian_elim_affine(rows, m)?;
+    let (x0, basis) = gaussian_elim_affine(rows, buttons.len())?;
     Ok(min_weight_solution(x0, &basis))
 }
 
-// -------------------
-// Linear algebra over GF(2)
-// -------------------
+// ================= Part 2 =================
 //
-// Returns:
-// - x0: one particular solution
-// - basis: nullspace basis vectors
+// Joltage mode:
+// - Ignore the light diagram.
+// - Each button press adds +1 to listed counters.
+// - Need minimum total presses to reach exact target vector.
 //
+// Correct fast strategy:
+// Use parity constraints + halving recursion.
+// Any solution vector x (press counts) satisfies A x = target over integers.
+// Mod 2, that implies A (x mod 2) = (target mod 2) over GF(2).
+//
+// So we:
+// 1) Solve A p = (target mod 2) over GF(2) to get all parity solutions p.
+// 2) For each parity p, subtract 1 from affected counters for each pressed button in p.
+// 3) Now all counters must be even; divide by 2 and recurse.
+// 4) Total presses = popcount(p) + 2 * recurse(half_target).
+//
+// Memoize by target vector to stay fast.
+//
+fn solve_part2(input: &str) -> Result<u64> {
+    input
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(min_presses_part2)
+        .map(|r| r.map(|x| x as u64))
+        .try_fold(0, |a, b| Ok(a + b?))
+}
+
+fn min_presses_part2(line: &str) -> Result<u32> {
+    let target = parse_jolts(line)?;
+    let buttons = parse_buttons(line)?;
+
+    // Build template: which buttons affect each counter
+    let rows_template: Vec<u128> = (0..target.len())
+        .map(|i| {
+            let mut v = 0;
+            for (j, &b) in buttons.iter().enumerate() {
+                if (b >> i) & 1 == 1 {
+                    v |= 1u128 << j;
+                }
+            }
+            v
+        })
+        .collect();
+
+    let mut pattern_cache: HashMap<u128, Vec<u128>> = HashMap::new();
+    let mut memo: HashMap<Vec<i32>, Option<u32>> = HashMap::new();
+
+    solve_rec(
+        target,
+        &rows_template,
+        buttons.len(),
+        &mut pattern_cache,
+        &mut memo,
+    )
+    .ok_or_else(|| anyhow!("no solution"))
+}
+
+fn solve_rec(
+    target: Vec<i32>,
+    rows_template: &[u128],
+    n_vars: usize,
+    pattern_cache: &mut HashMap<u128, Vec<u128>>,
+    memo: &mut HashMap<Vec<i32>, Option<u32>>,
+) -> Option<u32> {
+    if let Some(&r) = memo.get(&target) {
+        return r;
+    }
+
+    if target.iter().all(|&x| x == 0) {
+        memo.insert(target, Some(0));
+        return Some(0);
+    }
+
+    // pattern bits: which counters are odd
+    let pattern = target.iter().enumerate().fold(0u128, |acc, (i, &v)| {
+        if v & 1 == 1 { acc | (1u128 << i) } else { acc }
+    });
+
+    // Compute parity solutions if needed
+    if !pattern_cache.contains_key(&pattern) {
+        let rows: Vec<_> = rows_template
+            .iter()
+            .enumerate()
+            .map(|(i, &vars)| (vars, (pattern >> i) & 1 == 1))
+            .collect();
+
+        let sols = match gaussian_elim_affine(rows, n_vars) {
+            Ok((x0, basis)) => {
+                let k = basis.len();
+                let mut out = Vec::with_capacity(1 << k);
+                for mask in 0..(1u32 << k) {
+                    let mut x = x0;
+                    for i in 0..k {
+                        if (mask >> i) & 1 == 1 {
+                            x ^= basis[i];
+                        }
+                    }
+                    out.push(x);
+                }
+                out.sort_by_key(|x| x.count_ones());
+                out
+            }
+            Err(_) => Vec::new(),
+        };
+
+        pattern_cache.insert(pattern, sols);
+    }
+
+    let sols = pattern_cache.get(&pattern).unwrap().clone();
+    if sols.is_empty() {
+        memo.insert(target, None);
+        return None;
+    }
+
+    let mut best: Option<u32> = None;
+
+    'outer: for x in sols {
+        let parity_cost = x.count_ones() as u32;
+
+        let mut after = target.clone();
+
+        // subtract parity presses
+        for i in 0..after.len() {
+            let dec = (x & rows_template[i]).count_ones() as i32;
+            after[i] -= dec;
+            if after[i] < 0 || (after[i] & 1) != 0 {
+                continue 'outer;
+            }
+        }
+
+        // divide by 2
+        for v in &mut after {
+            *v /= 2;
+        }
+
+        if let Some(sub) = solve_rec(after, rows_template, n_vars, pattern_cache, memo) {
+            let cost = parity_cost + 2 * sub;
+
+            // Keep Rust inference happy.
+            best = Some(best.map_or(cost, |b: u32| b.min(cost)));
+        }
+    }
+
+    memo.insert(target, best);
+    best
+}
+
+// ================= Linear algebra =================
+
 fn gaussian_elim_affine(
     mut rows: Vec<(u128, bool)>,
     n_vars: usize,
 ) -> Result<(u128, Vec<u128>)> {
-    let mut pivot_row: Vec<Option<usize>> = vec![None; n_vars];
+    let mut pivot = vec![None; n_vars];
     let mut r = 0;
 
-    // Forward elimination
-    for col in 0..n_vars {
-        // Find pivot
-        let pivot = (r..rows.len()).find(|&i| ((rows[i].0 >> col) & 1) == 1);
-        let Some(p) = pivot else { continue };
+    for c in 0..n_vars {
+        if let Some(p) = (r..rows.len()).find(|&i| (rows[i].0 >> c) & 1 == 1) {
+            rows.swap(r, p);
+            pivot[c] = Some(r);
 
-        rows.swap(r, p);
-        pivot_row[col] = Some(r);
-
-        let (mask, rhs) = rows[r];
-
-        // Eliminate from all other rows
-        for i in 0..rows.len() {
-            if i != r && ((rows[i].0 >> col) & 1) == 1 {
-                rows[i].0 ^= mask;
-                rows[i].1 ^= rhs;
+            let (mask, rhs) = rows[r];
+            for i in 0..rows.len() {
+                if i != r && (rows[i].0 >> c) & 1 == 1 {
+                    rows[i].0 ^= mask;
+                    rows[i].1 ^= rhs;
+                }
             }
-        }
 
-        r += 1;
-        if r == rows.len() {
-            break;
+            r += 1;
         }
     }
 
-    // Check for inconsistency: 0 = 1
-    for (mask, rhs) in &rows {
-        if *mask == 0 && *rhs {
+    for (m, rhs) in &rows {
+        if *m == 0 && *rhs {
             return Err(anyhow!("no solution"));
         }
     }
 
-    // Identify free variables
-    let mut is_pivot = vec![false; n_vars];
-    for (c, pr) in pivot_row.iter().enumerate() {
-        if pr.is_some() {
-            is_pivot[c] = true;
-        }
-    }
-
-    let free_vars: Vec<usize> =
-        (0..n_vars).filter(|&c| !is_pivot[c]).collect();
-
-    // Particular solution: free vars = 0
-    let mut x0: u128 = 0;
-    for col in 0..n_vars {
-        if let Some(row) = pivot_row[col] {
+    let mut x0 = 0;
+    for c in 0..n_vars {
+        if let Some(row) = pivot[c] {
             if rows[row].1 {
-                x0 |= 1u128 << col;
+                x0 |= 1u128 << c;
             }
         }
     }
 
-    // Nullspace basis
-    let mut basis: Vec<u128> = Vec::new();
-    for &f in &free_vars {
-        let mut v = 1u128 << f;
-        for col in 0..n_vars {
-            if let Some(row) = pivot_row[col] {
-                if ((rows[row].0 >> f) & 1) == 1 {
-                    v ^= 1u128 << col;
+    let mut basis = Vec::new();
+    for f in 0..n_vars {
+        if pivot[f].is_none() {
+            let mut v = 1u128 << f;
+            for c in 0..n_vars {
+                if let Some(row) = pivot[c] {
+                    if (rows[row].0 >> f) & 1 == 1 {
+                        v ^= 1u128 << c;
+                    }
                 }
             }
+            basis.push(v);
         }
-        basis.push(v);
     }
 
     Ok((x0, basis))
 }
 
-// Enumerate all combinations of nullspace basis vectors
-// and return the minimum popcount solution.
-//
 fn min_weight_solution(x0: u128, basis: &[u128]) -> u32 {
-    let k = basis.len();
-    let mut best = u32::MAX;
+    let mut best: u32 = u32::MAX;
 
-    // AoC inputs keep k small; brute force is fine.
-    for mask in 0u32..(1u32 << k) {
+    for mask in 0..(1u32 << basis.len()) {
         let mut x = x0;
-        for i in 0..k {
-            if ((mask >> i) & 1) == 1 {
+        for i in 0..basis.len() {
+            if (mask >> i) & 1 == 1 {
                 x ^= basis[i];
             }
         }
@@ -227,24 +298,46 @@ fn min_weight_solution(x0: u128, basis: &[u128]) -> u32 {
     best
 }
 
-// -------------------
-// Small helpers
-// -------------------
+// ================= Parsing helpers =================
 
-fn extract_between(s: &str, open: char, close: char) -> Option<String> {
-    let start = s.find(open)?;
-    let end = s[start + 1..].find(close)? + start + 1;
-    Some(s[start + 1..end].to_string())
+fn parse_buttons(line: &str) -> Result<Vec<u128>> {
+    let mut out = Vec::new();
+    let mut rest = line;
+
+    while let Some((inside, after)) = extract_between_with_rest(rest, '(', ')') {
+        let mut mask = 0u128;
+        for s in inside.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            mask |= 1u128 << s.parse::<usize>()?;
+        }
+        out.push(mask);
+        rest = after;
+    }
+
+    if out.is_empty() {
+        return Err(anyhow!("no buttons"));
+    }
+    Ok(out)
 }
 
-fn extract_between_with_rest<'a>(
-    s: &'a str,
-    open: char,
-    close: char,
-) -> Option<(String, &'a str)> {
-    let start = s.find(open)?;
-    let end = s[start + 1..].find(close)? + start + 1;
-    Some((s[start + 1..end].to_string(), &s[end + 1..]))
+fn parse_jolts(line: &str) -> Result<Vec<i32>> {
+    let j = extract_between(line, '{', '}')
+        .ok_or_else(|| anyhow!("missing jolts"))?;
+
+    j.split(',')
+        .map(|s| s.trim().parse::<i32>().map_err(Into::into))
+        .collect()
+}
+
+fn extract_between(s: &str, a: char, b: char) -> Option<String> {
+    let i = s.find(a)?;
+    let j = s[i + 1..].find(b)? + i + 1;
+    Some(s[i + 1..j].to_string())
+}
+
+fn extract_between_with_rest<'a>(s: &'a str, a: char, b: char) -> Option<(String, &'a str)> {
+    let i = s.find(a)?;
+    let j = s[i + 1..].find(b)? + i + 1;
+    Some((s[i + 1..j].to_string(), &s[j + 1..]))
 }
 
 #[cfg(test)]
@@ -258,6 +351,16 @@ mod tests {
 [...#.] (0,2,3,4) (2,3) (0,4) (0,1,2) (1,2,3,4) {7,5,12,7,2}
 [.###.#] (0,1,2,3,4) (0,3,4) (0,1,2,4,5) (1,2) {10,11,11,5,10,5}
 "#;
-        assert_eq!(solve_part1(input).unwrap().to_string(), "7");
+        assert_eq!(solve_part1(input).unwrap(), 7);
+    }
+
+    #[test]
+    fn example_part2_total_is_33() {
+        let input = r#"
+[.##.] (3) (1,3) (2) (2,3) (0,2) (0,1) {3,5,4,7}
+[...#.] (0,2,3,4) (2,3) (0,4) (0,1,2) (1,2,3,4) {7,5,12,7,2}
+[.###.#] (0,1,2,3,4) (0,3,4) (0,1,2,4,5) (1,2) {10,11,11,5,10,5}
+"#;
+        assert_eq!(solve_part2(input).unwrap(), 33);
     }
 }
